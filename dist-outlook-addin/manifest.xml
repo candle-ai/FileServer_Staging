@@ -5,7 +5,7 @@
             xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0" 
             xsi:type="MailApp">
   <Id>42345678-1234-1234-1234-123456789014</Id>
-  <Version>1.0.10.0</Version>
+  <Version>1.0.11.0</Version>
   <ProviderName>Candle AI</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Candle AI Assistant - Staging"/>
@@ -19,6 +19,8 @@
     <AppDomain>https://cognito-idp.us-east-1.amazonaws.com</AppDomain>
     <AppDomain>https://bjqq0khodf.execute-api.us-east-1.amazonaws.com</AppDomain>
     <AppDomain>https://candle-663321693918-us-east-1.auth.us-east-1.amazoncognito.com</AppDomain>
+    <AppDomain>https://candle-565393026129-us-east-1.auth.us-east-1.amazoncognito.com</AppDomain>
+    <AppDomain>https://candle-448049808205-us-east-1.auth.us-east-1.amazoncognito.com</AppDomain>
     <AppDomain>https://candle-ai.github.io</AppDomain>
   </AppDomains>
   <Hosts>
