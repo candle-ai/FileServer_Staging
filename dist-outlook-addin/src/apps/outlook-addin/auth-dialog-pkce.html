@@ -288,7 +288,7 @@
         access_token: tokens.access_token,
         refresh_token: tokens.refresh_token,
         id_token: tokens.id_token,
-        expires_in: 200, //tokens.expires_in,
+        expires_in: tokens.expires_in,
         token_type: tokens.token_type || 'Bearer',
         fetched_at: Math.floor(Date.now()),
         userInfo: userInfo
