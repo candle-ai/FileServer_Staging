@@ -694,21 +694,29 @@
           if (wrapped) wrapped(ev);
         };
       }
+      // w.closed is NOT usable here. Once the sign-in window reaches the
+      // COOP page this handle is severed, and a severed handle reports closed
+      // while the window is still on screen and being typed into. Acting on it
+      // produced a false "window closed" error over a perfectly good sign-in.
+      // It is recorded purely as evidence and never drives a decision; the only
+      // real signals are the relay arriving, or time running out.
       var ticks = 0;
       var iv = setInterval(function () {
         ticks++;
-        var closed = null;
-        try { closed = w.closed; } catch (e) { closed = 'THREW'; }
-        if (ticks === 4) dlog('signInWindow.status', { after: '2s', closed: closed });
-        if (ticks === 20) dlog('signInWindow.status', { after: '10s', closed: closed, relayDone: relayDone });
-        if (closed === true && !relayDone) {
-          clearInterval(iv);
-          dlog('signInWindow.closedWithoutRelay', { afterSeconds: ticks / 2 });
-          setTimeout(function () {
-            if (!relayDone) showError('The sign-in window closed before it could report back. Please try again.');
-          }, 2000);
+        var closedReading = null;
+        try { closedReading = w.closed; } catch (e) { closedReading = 'THREW'; }
+        if (ticks === 4 || ticks === 20 || ticks === 120) {
+          dlog('signInWindow.status', {
+            after: (ticks / 2) + 's',
+            closedReadingUnreliable: closedReading,
+            relayDone: relayDone
+          });
         }
-        if (ticks > 600) clearInterval(iv);
+        if (relayDone || ticks > 600) { clearInterval(iv); return; }
+        if (ticks === 600) {
+          dlog('signInWindow.timeout', { afterSeconds: 300 });
+          showError('Sign-in timed out. Please try again.');
+        }
       }, 500);
     }
 
