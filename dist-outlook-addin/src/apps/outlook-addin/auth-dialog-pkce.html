@@ -67,6 +67,7 @@
       <button class="auth-button" onclick="location.reload()">Try Again</button>
     </div>
     <div class="env-info" id="env-info"></div>
+    <button class="auth-button" id="reopen" style="display:none" onclick="reopenSignIn()">Sign-in window didn't open? Click here</button>
     <button class="auth-button" id="dlog-copy" style="display:none" onclick="copyDlog()">Copy diagnostics</button>
     <pre id="dlog" style="display:none;text-align:left;white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.35;max-height:45vh;overflow:auto;background:#f6f5f2;color:#4b4a45;padding:8px;border-radius:6px;margin-top:12px"></pre>
   </div>
@@ -396,9 +397,19 @@
             dlog('startAuth.nestedThrew', { message: e.message });
           }
           if (signInWindow) {
-            dlog('startAuth.nestedWindow', { authUrl: authUrl });
+            // A blocked popup can still hand back an object, so record what we
+            // actually got rather than assuming a window appeared on screen.
+            var immediatelyClosed = null;
+            try { immediatelyClosed = signInWindow.closed; } catch (e) { immediatelyClosed = 'THREW: ' + e.message; }
+            dlog('startAuth.nestedWindow', {
+              authUrl: authUrl,
+              closedImmediately: immediatelyClosed,
+              note: 'if this says true, the window was blocked rather than opened'
+            });
+            try { signInWindow.focus(); } catch (e) { dlog('startAuth.focusThrew', { message: e.message }); }
             listenForRelay();
             showWaitingForSignIn();
+            watchSignInWindow(signInWindow);
             return;
           }
           // Blocked: fall through to navigating in place, which is what every
@@ -669,6 +680,40 @@
       try { showDlog(); } catch (e) {}
     }
 
+    /**
+     * The sign-in window is the only place the flow can make progress. If it
+     * goes away without relaying a code, say so instead of waiting forever.
+     */
+    function watchSignInWindow(w) {
+      var relayDone = false;
+      var originalListen = relayChannel && relayChannel.onmessage;
+      if (relayChannel) {
+        var wrapped = relayChannel.onmessage;
+        relayChannel.onmessage = function (ev) {
+          if (ev && ev.data && ev.data.type === 'AUTH_CODE') relayDone = true;
+          if (wrapped) wrapped(ev);
+        };
+      }
+      var ticks = 0;
+      var iv = setInterval(function () {
+        ticks++;
+        var closed = null;
+        try { closed = w.closed; } catch (e) { closed = 'THREW'; }
+        if (ticks === 4) dlog('signInWindow.status', { after: '2s', closed: closed });
+        if (ticks === 20) dlog('signInWindow.status', { after: '10s', closed: closed, relayDone: relayDone });
+        if (closed === true && !relayDone) {
+          clearInterval(iv);
+          dlog('signInWindow.closedWithoutRelay', { afterSeconds: ticks / 2 });
+          setTimeout(function () {
+            if (!relayDone) showError('The sign-in window closed before it could report back. Please try again.');
+          }, 2000);
+        }
+        if (ticks > 600) clearInterval(iv);
+      }, 500);
+    }
+
+    function reopenSignIn() { startAuth(); }
+
     function showWaitingForSignIn() {
       var btn = document.querySelector('.auth-button');
       if (btn) btn.style.display = 'none';
@@ -680,6 +725,9 @@
       }
       var err = document.getElementById('error');
       if (err) err.style.display = 'none';
+      var reopen = document.getElementById('reopen');
+      if (reopen) reopen.style.display = 'inline-block';
+      try { showDlog(); } catch (e) {}
     }
 
     function showLoading() {
