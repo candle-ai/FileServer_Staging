@@ -342,6 +342,7 @@
     async function handleCallback() {
       console.log(`Handling OAuth callback in ${CONFIG.environment} environment...`);
       showLoading();
+      try { showDlog(); } catch (e) {}
 
       const urlParams = new URLSearchParams(window.location.search);
       const code = urlParams.get('code');
@@ -538,6 +539,7 @@
           console.log('Message sent via Office.context.ui.messageParent');
           delivery.messageParent = 'ok';
           dlog('sendMessage.delivery', delivery);
+          try { showDlog(); } catch (e) {}
           return;
         } catch (error) {
           console.error('Office.context.ui.messageParent failed:', error);
@@ -563,11 +565,9 @@
       }
 
       dlog('sendMessage.delivery', delivery);
-      // Nothing got through. Keep the window up with the log on screen rather
-      // than leaving a closed popup and no explanation.
-      if (delivery.messageParent !== 'ok' && delivery.postMessage !== 'ok') {
-        try { showDlog(); } catch (e) {}
-      }
+      // Always surface the panel. If it only appeared on failure, its absence
+      // would be ambiguous between "delivery worked" and "never got here".
+      try { showDlog(); } catch (e) {}
     }
 
     function showLoading() {
