@@ -67,9 +67,80 @@
       <button class="auth-button" onclick="location.reload()">Try Again</button>
     </div>
     <div class="env-info" id="env-info"></div>
+    <button class="auth-button" id="dlog-copy" style="display:none" onclick="copyDlog()">Copy diagnostics</button>
+    <pre id="dlog" style="display:none;text-align:left;white-space:pre-wrap;word-break:break-all;font-size:10px;line-height:1.35;max-height:45vh;overflow:auto;background:#f6f5f2;color:#4b4a45;padding:8px;border-radius:6px;margin-top:12px"></pre>
   </div>
 
   <script>
+    // ---- verbose auth diagnostics -------------------------------------
+    // The dialog is a separate window from the taskpane, so its console is a
+    // separate devtools target and none of it reaches Download Diagnostics.
+    // Every step is mirrored to four places so at least one survives:
+    // the console, the page itself, storage, and a BroadcastChannel the
+    // taskpane listens on.
+    var DLOG_KEY = 'candle_auth_dialog_log';
+    var DLOG = [];
+    var dlogChannel = null;
+    try { dlogChannel = new BroadcastChannel('candle-auth-dialog'); } catch (e) { dlogChannel = null; }
+
+    function dlog(tag, data) {
+      var entry = { ts: new Date().toISOString(), tag: tag, data: data === undefined ? null : data };
+      DLOG.push(entry);
+      try { console.log('[AuthDialog]', tag, entry.data); } catch (e) {}
+      try { localStorage.setItem(DLOG_KEY, JSON.stringify(DLOG.slice(-300))); } catch (e) {}
+      try { sessionStorage.setItem(DLOG_KEY, JSON.stringify(DLOG.slice(-300))); } catch (e) {}
+      try { if (dlogChannel) dlogChannel.postMessage({ type: 'AUTH_DIALOG_LOG', entry: entry }); } catch (e) {}
+      try { renderDlog(); } catch (e) {}
+    }
+
+    function dlogText() {
+      return DLOG.map(function (e) {
+        return e.ts + '  ' + e.tag + (e.data === null ? '' : '  ' + JSON.stringify(e.data));
+      }).join('\n');
+    }
+
+    function renderDlog() {
+      var el = document.getElementById('dlog');
+      if (el && el.style.display !== 'none') { el.textContent = dlogText(); }
+    }
+
+    function showDlog() {
+      var el = document.getElementById('dlog');
+      var btn = document.getElementById('dlog-copy');
+      if (el) { el.style.display = 'block'; el.textContent = dlogText(); }
+      if (btn) { btn.style.display = 'inline-block'; }
+    }
+
+    function copyDlog() {
+      var t = dlogText();
+      try { navigator.clipboard.writeText(t); } catch (e) {}
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = t;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      } catch (e) {}
+    }
+
+    function ssGet(k) { try { return sessionStorage.getItem(k); } catch (e) { return 'THREW: ' + e.message; } }
+
+    function probeStorage() {
+      var out = {};
+      try {
+        sessionStorage.setItem('__probe', '1');
+        out.sessionWritable = sessionStorage.getItem('__probe') === '1';
+        sessionStorage.removeItem('__probe');
+      } catch (e) { out.sessionWritable = 'THREW: ' + e.message; }
+      try {
+        localStorage.setItem('__probe', '1');
+        out.localWritable = localStorage.getItem('__probe') === '1';
+        localStorage.removeItem('__probe');
+      } catch (e) { out.localWritable = 'THREW: ' + e.message; }
+      return out;
+    }
+
     // Environment detection and configuration
     function getEnvironmentConfig() {
       const hostname = window.location.hostname;
@@ -201,6 +272,26 @@
     // Display environment info
     document.getElementById('env-info').textContent = `Environment: ${CONFIG.environment}`;
 
+    dlog('boot', {
+      href: window.location.href,
+      hostname: window.location.hostname,
+      search: window.location.search,
+      isCallback: new URLSearchParams(window.location.search).get('callback') === 'true',
+      environment: CONFIG.environment,
+      cognitoDomain: CONFIG.COGNITO_DOMAIN,
+      redirectUri: CONFIG.REDIRECT_URI,
+      tokenEndpoint: CONFIG.TOKEN_ENDPOINT,
+      clientId: CONFIG.CLIENT_ID,
+      officeDefined: typeof Office !== 'undefined',
+      officeContext: typeof Office !== 'undefined' && !!Office.context,
+      hasOpener: !!window.opener,
+      storage: probeStorage(),
+      priorState: ssGet('pkce_state'),
+      priorVerifier: ssGet('pkce_verifier') ? 'present' : null,
+      priorEnvironment: ssGet('pkce_environment'),
+      userAgent: navigator.userAgent
+    });
+
     async function startAuth() {
       console.log(`Starting PKCE authentication in ${CONFIG.environment} environment...`);
       showLoading();
@@ -216,6 +307,17 @@
         sessionStorage.setItem('pkce_state', state);
         sessionStorage.setItem('pkce_environment', CONFIG.environment);
 
+        // Read straight back: if the write did not stick, the callback leg
+        // will fail its state check and send nothing at all.
+        dlog('startAuth.stored', {
+          stateWritten: state,
+          stateReadBack: ssGet('pkce_state'),
+          stateMatches: ssGet('pkce_state') === state,
+          verifierWrittenLen: codeVerifier.length,
+          verifierReadBackLen: (ssGet('pkce_verifier') || '').length,
+          environmentReadBack: ssGet('pkce_environment')
+        });
+
         // Build auth URL with PKCE
         const authUrl = `${CONFIG.COGNITO_DOMAIN}/login?` +
           `client_id=${CONFIG.CLIENT_ID}&` +
@@ -228,9 +330,11 @@
 
         console.log('Auth URL:', authUrl);
         console.log('Redirect URI:', CONFIG.REDIRECT_URI);
+        dlog('startAuth.redirect', { authUrl: authUrl, redirectUri: CONFIG.REDIRECT_URI });
         window.location.href = authUrl;
       } catch (error) {
         console.error('Error starting auth:', error);
+        dlog('startAuth.threw', { message: error && error.message, stack: error && error.stack });
         showError('Failed to start authentication: ' + error.message);
       }
     }
@@ -245,14 +349,31 @@
       const error = urlParams.get('error');
       const errorDescription = urlParams.get('error_description');
 
+      dlog('callback.params', {
+        code: code ? 'present(len=' + code.length + ')' : null,
+        stateReceived: state,
+        stateStored: ssGet('pkce_state'),
+        stateMatches: state === ssGet('pkce_state'),
+        verifierStored: ssGet('pkce_verifier') ? 'present(len=' + (ssGet('pkce_verifier') || '').length + ')' : null,
+        environmentStored: ssGet('pkce_environment'),
+        oauthError: error,
+        oauthErrorDescription: errorDescription,
+        storage: probeStorage(),
+        hasOpener: !!window.opener,
+        officeDefined: typeof Office !== 'undefined',
+        officeContextUi: typeof Office !== 'undefined' && !!(Office.context && Office.context.ui)
+      });
+
       if (error) {
         console.error('OAuth error:', error, errorDescription);
+        dlog('callback.oauthError', { error: error, description: errorDescription });
         showError(`Authentication failed: ${error}${errorDescription ? ' - ' + errorDescription : ''}`);
         return;
       }
 
       if (!code) {
         console.error('No authorization code received');
+        dlog('callback.noCode', { search: window.location.search });
         showError('No authorization code received from authentication provider');
         return;
       }
@@ -261,6 +382,14 @@
       const storedState = sessionStorage.getItem('pkce_state');
       if (state !== storedState) {
         console.error('State mismatch:', { received: state, stored: storedState });
+        dlog('callback.stateMismatch', {
+          received: state,
+          stored: storedState,
+          storedIsNull: storedState === null,
+          note: storedState === null
+            ? 'sessionStorage did NOT survive the navigation to Cognito and back'
+            : 'both present but different'
+        });
         showError('Invalid state parameter - possible security issue');
         return;
       }
@@ -268,6 +397,7 @@
       try {
         // Exchange code for tokens
         const codeVerifier = sessionStorage.getItem('pkce_verifier');
+        dlog('callback.verifier', { present: !!codeVerifier, len: (codeVerifier || '').length });
         if (!codeVerifier) {
           throw new Error('Code verifier not found in session storage');
         }
@@ -281,6 +411,12 @@
         sessionStorage.removeItem('pkce_env');
 
         console.log('Authentication successful');
+        dlog('callback.exchangeOk', {
+          hasAccess: !!tokens.access_token,
+          hasRefresh: !!tokens.refresh_token,
+          hasId: !!tokens.id_token,
+          expiresIn: tokens.expires_in
+        });
         sendMessage({ 
           type: 'AUTH_SUCCESS', 
           tokens: tokens,
@@ -288,6 +424,7 @@
         });
       } catch (error) {
         console.error('Token exchange failed:', error);
+        dlog('callback.exchangeFailed', { message: error && error.message, stack: error && error.stack });
         showError('Token exchange failed: ' + error.message);
       }
     }
@@ -313,6 +450,7 @@
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Token exchange response:', response.status, errorText);
+        dlog('exchange.httpError', { endpoint: CONFIG.TOKEN_ENDPOINT, status: response.status, body: errorText });
         throw new Error(`Token exchange failed: ${response.status} ${errorText}`);
       }
 
@@ -349,28 +487,86 @@
 
     function sendMessage(message) {
       console.log('Sending message:', { ...message, tokens: message.tokens ? '[REDACTED]' : undefined });
-      
+
+      var delivery = {
+        type: message && message.type,
+        officeDefined: typeof Office !== 'undefined',
+        officeContext: typeof Office !== 'undefined' && !!Office.context,
+        officeContextUi: typeof Office !== 'undefined' && !!(Office.context && Office.context.ui),
+        messageParentFn: typeof Office !== 'undefined' && !!(Office.context && Office.context.ui && Office.context.ui.messageParent),
+        messageParent: 'not-attempted',
+        openerPresent: false,
+        openerClosed: null,
+        postMessage: 'not-attempted',
+        broadcast: 'not-attempted'
+      };
+
+      // Opener state is recorded even when messageParent succeeds: a severed
+      // handle reports closed while the window is still on screen, which is
+      // what COOP does to a popup, and it is the thing we are trying to see.
+      try {
+        delivery.openerPresent = !!window.opener;
+        delivery.openerClosed = window.opener ? window.opener.closed : null;
+      } catch (e) {
+        delivery.openerPresent = 'THREW: ' + e.message;
+      }
+
+      // Third channel, independent of both Office and the opener. Same origin
+      // as the taskpane, so it arrives whenever the two share a storage
+      // partition; the taskpane listens for it during login.
+      try {
+        if (dlogChannel) {
+          dlogChannel.postMessage({ type: 'AUTH_DIALOG_RESULT', payload: message });
+          delivery.broadcast = 'sent';
+        } else {
+          delivery.broadcast = 'no-channel';
+        }
+      } catch (e) {
+        delivery.broadcast = 'THREW: ' + e.message;
+      }
+      try {
+        localStorage.setItem('candle_auth_dialog_result', JSON.stringify({ ts: Date.now(), payload: message }));
+        delivery.localStorageWrite = 'ok';
+      } catch (e) {
+        delivery.localStorageWrite = 'THREW: ' + e.message;
+      }
+
       // Try Office Dialog API first
-      if (typeof Office !== 'undefined' && Office.context && Office.context.ui && Office.context.ui.messageParent) {
+      if (delivery.messageParentFn) {
         try {
           Office.context.ui.messageParent(JSON.stringify(message));
           console.log('Message sent via Office.context.ui.messageParent');
+          delivery.messageParent = 'ok';
+          dlog('sendMessage.delivery', delivery);
           return;
         } catch (error) {
           console.error('Office.context.ui.messageParent failed:', error);
+          delivery.messageParent = 'THREW: ' + (error && error.message);
         }
+      } else {
+        delivery.messageParent = 'unavailable';
       }
-      
+
       // Fallback to postMessage
       try {
         if (window.opener && !window.opener.closed) {
           window.opener.postMessage(message, '*');
           console.log('Message sent via postMessage');
+          delivery.postMessage = 'ok';
         } else {
           console.warn('No window.opener available');
+          delivery.postMessage = 'no-usable-opener';
         }
       } catch (error) {
         console.error('postMessage failed:', error);
+        delivery.postMessage = 'THREW: ' + (error && error.message);
+      }
+
+      dlog('sendMessage.delivery', delivery);
+      // Nothing got through. Keep the window up with the log on screen rather
+      // than leaving a closed popup and no explanation.
+      if (delivery.messageParent !== 'ok' && delivery.postMessage !== 'ok') {
+        try { showDlog(); } catch (e) {}
       }
     }
 
@@ -381,6 +577,8 @@
     }
 
     function showError(message) {
+      try { dlog('showError', { message: message }); } catch (e) {}
+      try { showDlog(); } catch (e) {}
       document.querySelector('.auth-button').style.display = 'none';
       document.getElementById('loading').style.display = 'none';
       document.getElementById('error').style.display = 'block';
