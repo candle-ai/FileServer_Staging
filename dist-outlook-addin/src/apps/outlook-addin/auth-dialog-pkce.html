@@ -126,6 +126,62 @@
 
     function ssGet(k) { try { return sessionStorage.getItem(k); } catch (e) { return 'THREW: ' + e.message; } }
 
+    // ---- nested sign-in window relay ---------------------------------
+    // In Outlook on the web the Office dialog is a real browser popup, and
+    // Cognito managed login serves Cross-Origin-Opener-Policy: same-origin.
+    // Navigating the dialog itself to that page severs the handle Office uses
+    // to track it: Office reports the dialog closed about three seconds in and
+    // no message can ever be delivered back to the taskpane.
+    //
+    // So on the web the dialog stays on our own origin and never traverses the
+    // COOP page. It opens a second window for the sign-in instead. That window
+    // takes the severance, and hands the authorization code back over a
+    // BroadcastChannel — two same-origin top-level windows share a storage
+    // partition, unlike the popup and the taskpane iframe. The dialog's own
+    // channel to Office is untouched, so messageParent still works.
+    var relayChannel = null;
+    try { relayChannel = new BroadcastChannel('candle-auth-relay'); } catch (e) { relayChannel = null; }
+
+    function wantsNestedWindow() {
+      try { return new URLSearchParams(window.location.search).get('nested') === '1'; }
+      catch (e) { return false; }
+    }
+
+    /** Dialog side: take the code from the sign-in window and finish the flow. */
+    function listenForRelay() {
+      if (!relayChannel) { dlog('relay.unavailable', {}); return; }
+      relayChannel.onmessage = function (ev) {
+        var d = ev && ev.data;
+        if (!d || d.type !== 'AUTH_CODE') return;
+        dlog('relay.received', { stateReceived: d.state, hasCode: !!d.code });
+        try { relayChannel.postMessage({ type: 'AUTH_CODE_ACK', state: d.state }); } catch (e) {}
+        completeWithCode(d.code, d.state);
+      };
+      dlog('relay.listening', {});
+    }
+
+    /**
+     * Sign-in window side: offer the code to a dialog that is waiting. Resolves
+     * true once one acknowledges, which means this window's job is finished.
+     */
+    function relayCodeToDialog(code, state) {
+      return new Promise(function (resolve) {
+        if (!relayChannel) { resolve(false); return; }
+        var settled = false;
+        relayChannel.addEventListener('message', function (ev) {
+          var d = ev && ev.data;
+          if (!settled && d && d.type === 'AUTH_CODE_ACK') { settled = true; resolve(true); }
+        });
+        try {
+          relayChannel.postMessage({ type: 'AUTH_CODE', code: code, state: state });
+          dlog('relay.offered', { state: state });
+        } catch (e) {
+          dlog('relay.postFailed', { message: e.message });
+        }
+        setTimeout(function () { if (!settled) { settled = true; resolve(false); } }, 2500);
+      });
+    }
+
     function probeStorage() {
       var out = {};
       try {
@@ -330,6 +386,26 @@
 
         console.log('Auth URL:', authUrl);
         console.log('Redirect URI:', CONFIG.REDIRECT_URI);
+
+        if (wantsNestedWindow()) {
+          // Opened from a click, so this is not caught by the popup blocker.
+          var signInWindow = null;
+          try {
+            signInWindow = window.open(authUrl, 'candle-auth-signin', 'width=520,height=700');
+          } catch (e) {
+            dlog('startAuth.nestedThrew', { message: e.message });
+          }
+          if (signInWindow) {
+            dlog('startAuth.nestedWindow', { authUrl: authUrl });
+            listenForRelay();
+            showWaitingForSignIn();
+            return;
+          }
+          // Blocked: fall through to navigating in place, which is what every
+          // other host does. Worse on the web, but better than nothing.
+          dlog('startAuth.nestedBlocked', { fallingBackTo: 'top-level navigation' });
+        }
+
         dlog('startAuth.redirect', { authUrl: authUrl, redirectUri: CONFIG.REDIRECT_URI });
         window.location.href = authUrl;
       } catch (error) {
@@ -378,6 +454,29 @@
         showError('No authorization code received from authentication provider');
         return;
       }
+
+      // Offer the code to a dialog waiting on the relay. On the web that
+      // dialog still has a working channel to Office; this window does not,
+      // because it is the one that went through the COOP page.
+      const relayed = await relayCodeToDialog(code, state);
+      if (relayed) {
+        dlog('callback.relayed', { note: 'a dialog acknowledged; closing this window' });
+        try { window.close(); } catch (e) { /* ignore */ }
+        return;
+      }
+      dlog('callback.notRelayed', { note: 'no dialog acknowledged; completing in this window' });
+
+      completeWithCode(code, state);
+    }
+
+    /**
+     * Validate the state, exchange the code, and report back. Runs in the
+     * dialog when the relay delivered the code, and in the returning window
+     * itself on hosts that never needed a nested window.
+     */
+    async function completeWithCode(code, state) {
+      showLoading();
+      try { showDlog(); } catch (e) {}
 
       // Validate state
       const storedState = sessionStorage.getItem('pkce_state');
@@ -568,6 +667,19 @@
       // Always surface the panel. If it only appeared on failure, its absence
       // would be ambiguous between "delivery worked" and "never got here".
       try { showDlog(); } catch (e) {}
+    }
+
+    function showWaitingForSignIn() {
+      var btn = document.querySelector('.auth-button');
+      if (btn) btn.style.display = 'none';
+      var loading = document.getElementById('loading');
+      if (loading) {
+        var p = loading.querySelector('p');
+        if (p) p.textContent = 'Complete sign-in in the window that just opened...';
+        loading.style.display = 'block';
+      }
+      var err = document.getElementById('error');
+      if (err) err.style.display = 'none';
     }
 
     function showLoading() {
