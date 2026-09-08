@@ -88,11 +88,11 @@
           // Dev2 local environment — uses dev2 AWS account (751821721024)
           return {
             environment: 'dev2-local',
-            COGNITO_DOMAIN: 'https://candle-751821721024-us-east-1.auth.us-east-1.amazoncognito.com',
+            COGNITO_DOMAIN: 'https://auth.dev2.trycandle.ai',
             CLIENT_ID: '7iuhipiovk7d08esf8im7hr3ml',
             REDIRECT_URI: 'https://localhost:5174/auth-dialog-pkce.html?callback=true',
-            TOKEN_ENDPOINT: 'https://candle-751821721024-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/token',
-            USERINFO_ENDPOINT: 'https://candle-751821721024-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/userInfo'
+            TOKEN_ENDPOINT: 'https://auth.dev2.trycandle.ai/oauth2/token',
+            USERINFO_ENDPOINT: 'https://auth.dev2.trycandle.ai/oauth2/userInfo'
           };
         }
 
@@ -100,72 +100,72 @@
           // Demo local environment — uses demo AWS account (482624378498)
           return {
             environment: 'demo-local',
-            COGNITO_DOMAIN: 'https://candle-482624378498-us-east-1.auth.us-east-1.amazoncognito.com',
+            COGNITO_DOMAIN: 'https://auth.demo.trycandle.ai',
             CLIENT_ID: '580d2bi0qbpije4b55vflcsehg',
             REDIRECT_URI: 'https://localhost:5174/auth-dialog-pkce.html?callback=true',
-            TOKEN_ENDPOINT: 'https://candle-482624378498-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/token',
-            USERINFO_ENDPOINT: 'https://candle-482624378498-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/userInfo'
+            TOKEN_ENDPOINT: 'https://auth.demo.trycandle.ai/oauth2/token',
+            USERINFO_ENDPOINT: 'https://auth.demo.trycandle.ai/oauth2/userInfo'
           };
         }
 
         // Default local environment — uses dev AWS account (663321693918)
         return {
           environment: 'local',
-          COGNITO_DOMAIN: 'https://candle-663321693918-us-east-1.auth.us-east-1.amazoncognito.com',
+          COGNITO_DOMAIN: 'https://auth.dev.trycandle.ai',
           CLIENT_ID: '4hoar9e471p1vtkiaavocfgkdt',
           REDIRECT_URI: 'https://localhost:5174/auth-dialog-pkce.html?callback=true',
-          TOKEN_ENDPOINT: 'https://candle-663321693918-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/token',
-          USERINFO_ENDPOINT: 'https://candle-663321693918-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/userInfo'
+          TOKEN_ENDPOINT: 'https://auth.dev.trycandle.ai/oauth2/token',
+          USERINFO_ENDPOINT: 'https://auth.dev.trycandle.ai/oauth2/userInfo'
         };
       } else if (path.includes('FileServer_Staging')) {
         // Staging environment (GitHub Pages)
         return {
           environment: 'staging',
-          COGNITO_DOMAIN: 'https://candle-565393026129-us-east-1.auth.us-east-1.amazoncognito.com',
+          COGNITO_DOMAIN: 'https://auth.staging.trycandle.ai',
           CLIENT_ID: '22pj09tqppmia7sh207a3ufaq9',
           REDIRECT_URI: 'https://candle-ai.github.io/FileServer_Staging/dist-outlook-addin/src/apps/outlook-addin/auth-dialog-pkce.html?callback=true',
-          TOKEN_ENDPOINT: 'https://candle-565393026129-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/token',
-          USERINFO_ENDPOINT: 'https://candle-565393026129-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/userInfo'
+          TOKEN_ENDPOINT: 'https://auth.staging.trycandle.ai/oauth2/token',
+          USERINFO_ENDPOINT: 'https://auth.staging.trycandle.ai/oauth2/userInfo'
         };
       } else if (path.includes('FileServer_Prod')) {
         // Prod environment (GitHub Pages)
         return {
           environment: 'prod',
-          COGNITO_DOMAIN: 'https://candle-448049808205-us-east-1.auth.us-east-1.amazoncognito.com',
+          COGNITO_DOMAIN: 'https://auth.trycandle.ai',
           CLIENT_ID: '6s4fvuas12p625ssbstt48rpke',
           REDIRECT_URI: 'https://candle-ai.github.io/FileServer_Prod/dist-outlook-addin/src/apps/outlook-addin/auth-dialog-pkce.html?callback=true',
-          TOKEN_ENDPOINT: 'https://candle-448049808205-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/token',
-          USERINFO_ENDPOINT: 'https://candle-448049808205-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/userInfo'
+          TOKEN_ENDPOINT: 'https://auth.trycandle.ai/oauth2/token',
+          USERINFO_ENDPOINT: 'https://auth.trycandle.ai/oauth2/userInfo'
         };
       } else if (path.includes('FileServer_Dev2')) {
         // Dev2 environment (GitHub Pages) — uses dev2 AWS account (751821721024)
         return {
           environment: 'dev2',
-          COGNITO_DOMAIN: 'https://candle-751821721024-us-east-1.auth.us-east-1.amazoncognito.com',
+          COGNITO_DOMAIN: 'https://auth.dev2.trycandle.ai',
           CLIENT_ID: '7iuhipiovk7d08esf8im7hr3ml',
           REDIRECT_URI: 'https://candle-ai.github.io/FileServer_Dev2/dist-outlook-addin/src/apps/outlook-addin/auth-dialog-pkce.html?callback=true',
-          TOKEN_ENDPOINT: 'https://candle-751821721024-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/token',
-          USERINFO_ENDPOINT: 'https://candle-751821721024-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/userInfo'
+          TOKEN_ENDPOINT: 'https://auth.dev2.trycandle.ai/oauth2/token',
+          USERINFO_ENDPOINT: 'https://auth.dev2.trycandle.ai/oauth2/userInfo'
         };
       } else if (path.includes('FileServer_Demo')) {
         // Demo environment (GitHub Pages) — uses demo AWS account (482624378498)
         return {
           environment: 'demo',
-          COGNITO_DOMAIN: 'https://candle-482624378498-us-east-1.auth.us-east-1.amazoncognito.com',
+          COGNITO_DOMAIN: 'https://auth.demo.trycandle.ai',
           CLIENT_ID: '580d2bi0qbpije4b55vflcsehg',
           REDIRECT_URI: 'https://candle-ai.github.io/FileServer_Demo/dist-outlook-addin/src/apps/outlook-addin/auth-dialog-pkce.html?callback=true',
-          TOKEN_ENDPOINT: 'https://candle-482624378498-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/token',
-          USERINFO_ENDPOINT: 'https://candle-482624378498-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/userInfo'
+          TOKEN_ENDPOINT: 'https://auth.demo.trycandle.ai/oauth2/token',
+          USERINFO_ENDPOINT: 'https://auth.demo.trycandle.ai/oauth2/userInfo'
         };
       } else {
         // Dev environment (GitHub Pages) — default fallback
         return {
           environment: 'dev',
-          COGNITO_DOMAIN: 'https://candle-663321693918-us-east-1.auth.us-east-1.amazoncognito.com',
+          COGNITO_DOMAIN: 'https://auth.dev.trycandle.ai',
           CLIENT_ID: '4hoar9e471p1vtkiaavocfgkdt',
           REDIRECT_URI: 'https://candle-ai.github.io/FileServer/dist-outlook-addin/src/apps/outlook-addin/auth-dialog-pkce.html?callback=true',
-          TOKEN_ENDPOINT: 'https://candle-663321693918-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/token',
-          USERINFO_ENDPOINT: 'https://candle-663321693918-us-east-1.auth.us-east-1.amazoncognito.com/oauth2/userInfo'
+          TOKEN_ENDPOINT: 'https://auth.dev.trycandle.ai/oauth2/token',
+          USERINFO_ENDPOINT: 'https://auth.dev.trycandle.ai/oauth2/userInfo'
         };
       }
     }
