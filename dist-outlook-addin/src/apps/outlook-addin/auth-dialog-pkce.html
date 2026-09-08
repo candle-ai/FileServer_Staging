@@ -79,7 +79,15 @@
     // Every step is mirrored to four places so at least one survives:
     // the console, the page itself, storage, and a BroadcastChannel the
     // taskpane listens on.
-    var DLOG_KEY = 'candle_auth_dialog_log';
+    // The dialog and the sign-in window are separate windows running this same
+    // file. They must not share one log key or each would erase the other's.
+    var IS_CALLBACK = (function () {
+      try { return new URLSearchParams(window.location.search).get('callback') === 'true'; }
+      catch (e) { return false; }
+    })();
+    var DLOG_KEY = IS_CALLBACK ? 'candle_auth_callback_log' : 'candle_auth_dialog_log';
+    var OTHER_DLOG_KEY = IS_CALLBACK ? 'candle_auth_dialog_log' : 'candle_auth_callback_log';
+    var RELAY_PAYLOAD_KEY = 'candle_auth_relay_payload';
     var DLOG = [];
     var dlogChannel = null;
     try { dlogChannel = new BroadcastChannel('candle-auth-dialog'); } catch (e) { dlogChannel = null; }
@@ -94,10 +102,26 @@
       try { renderDlog(); } catch (e) {}
     }
 
-    function dlogText() {
-      return DLOG.map(function (e) {
-        return e.ts + '  ' + e.tag + (e.data === null ? '' : '  ' + JSON.stringify(e.data));
+    function fmt(entries) {
+      return entries.map(function (e) {
+        return e.ts + '  ' + e.tag + (e.data === null || e.data === undefined ? '' : '  ' + JSON.stringify(e.data));
       }).join('\n');
+    }
+
+    function dlogText() {
+      var mine = '--- ' + (IS_CALLBACK ? 'sign-in window' : 'dialog') + ' ---\n' + fmt(DLOG);
+      var other = '';
+      try {
+        var raw = localStorage.getItem(OTHER_DLOG_KEY);
+        if (raw) {
+          other = '\n\n--- ' + (IS_CALLBACK ? 'dialog' : 'sign-in window') + ' ---\n' + fmt(JSON.parse(raw));
+        } else {
+          other = '\n\n--- ' + (IS_CALLBACK ? 'dialog' : 'sign-in window') + ' --- (nothing in localStorage: it never ran, or storage is not shared)';
+        }
+      } catch (e) {
+        other = '\n\n--- other window --- (read failed: ' + e.message + ')';
+      }
+      return mine + other;
     }
 
     function renderDlog() {
@@ -148,6 +172,29 @@
       catch (e) { return false; }
     }
 
+    var completionStarted = false;
+
+    /**
+     * Second delivery path. If BroadcastChannel does not bridge the two windows
+     * this still does, because both are top-level documents on the same origin.
+     */
+    function pollRelayStorage() {
+      var iv = setInterval(function () {
+        var raw = null;
+        try { raw = localStorage.getItem(RELAY_PAYLOAD_KEY); } catch (e) { return; }
+        if (!raw) return;
+        clearInterval(iv);
+        try { localStorage.removeItem(RELAY_PAYLOAD_KEY); } catch (e) {}
+        var payload = null;
+        try { payload = JSON.parse(raw); } catch (e) { dlog('relay.storageParseFailed', { message: e.message }); return; }
+        if (payload && payload.code) {
+          dlog('relay.receivedViaStorage', { stateReceived: payload.state });
+          completeWithCode(payload.code, payload.state);
+        }
+      }, 300);
+      setTimeout(function () { clearInterval(iv); }, 5 * 60 * 1000);
+    }
+
     /** Dialog side: take the code from the sign-in window and finish the flow. */
     function listenForRelay() {
       if (!relayChannel) { dlog('relay.unavailable', {}); return; }
@@ -173,6 +220,15 @@
           var d = ev && ev.data;
           if (!settled && d && d.type === 'AUTH_CODE_ACK') { settled = true; resolve(true); }
         });
+        // Two independent channels. BroadcastChannel is instant when it works;
+        // localStorage survives the channel not bridging at all, and the dialog
+        // polls for it.
+        try {
+          localStorage.setItem(RELAY_PAYLOAD_KEY, JSON.stringify({ ts: Date.now(), code: code, state: state }));
+          dlog('relay.parkedInStorage', { state: state });
+        } catch (e) {
+          dlog('relay.parkFailed', { message: e.message });
+        }
         try {
           relayChannel.postMessage({ type: 'AUTH_CODE', code: code, state: state });
           dlog('relay.offered', { state: state });
@@ -363,6 +419,10 @@
         sessionStorage.setItem('pkce_verifier', codeVerifier);
         sessionStorage.setItem('pkce_state', state);
         sessionStorage.setItem('pkce_environment', CONFIG.environment);
+        // Clear anything a previous attempt left behind so a stale code or log
+        // cannot be mistaken for this attempt's.
+        try { localStorage.removeItem(RELAY_PAYLOAD_KEY); } catch (e) {}
+        try { localStorage.removeItem('candle_auth_callback_log'); } catch (e) {}
 
         // Read straight back: if the write did not stick, the callback leg
         // will fail its state check and send nothing at all.
@@ -408,6 +468,7 @@
             });
             try { signInWindow.focus(); } catch (e) { dlog('startAuth.focusThrew', { message: e.message }); }
             listenForRelay();
+            pollRelayStorage();
             showWaitingForSignIn();
             watchSignInWindow(signInWindow);
             return;
@@ -486,6 +547,8 @@
      * itself on hosts that never needed a nested window.
      */
     async function completeWithCode(code, state) {
+      if (completionStarted) { dlog('completeWithCode.ignoredDuplicate', {}); return; }
+      completionStarted = true;
       showLoading();
       try { showDlog(); } catch (e) {}
 
