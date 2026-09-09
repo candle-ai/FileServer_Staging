@@ -206,10 +206,13 @@
     // will report the dialog as closed; the taskpane knows to ignore that on
     // the web, and the API callback page closes the window when sign-in ends.
     //
-    // The page redirects to whatever it is handed, so it refuses anything that
-    // is not one of our Cognito hosts.
-    var HANDOFF_HOST_PATTERN = /(^|\.)trycandle\.ai$|(^|\.)amazoncognito\.com$/;
-
+    // The page redirects to whatever it is handed, it is publicly hosted, and
+    // it redirects before Office is involved, so in a plain browser it would be
+    // an open redirector. It therefore accepts exactly one destination: the
+    // Cognito origin this environment signs in with (CONFIG.COGNITO_DOMAIN,
+    // the same value the taskpane builds the authorize URL from). Not another
+    // AWS customer's Cognito host, not another Candle environment's, not
+    // another Candle subdomain.
     function isHandoffMode(search) {
       return new URLSearchParams(search).get('mode') === 'handoff';
     }
@@ -225,7 +228,13 @@
       } catch (e) {
         return null;
       }
-      if (url.protocol !== 'https:' || !HANDOFF_HOST_PATTERN.test(url.hostname)) return null;
+      var expectedOrigin;
+      try {
+        expectedOrigin = new URL(CONFIG.COGNITO_DOMAIN).origin;
+      } catch (e) {
+        return null;
+      }
+      if (url.protocol !== 'https:' || url.origin !== expectedOrigin) return null;
       return url.toString();
     }
 
@@ -310,15 +319,24 @@
       const error = urlParams.get('error');
       const errorDescription = urlParams.get('error_description');
 
-      if (error) {
+      if (error || errorDescription) {
+        // A refusal from a Cognito trigger (address not added to Candle, wrong
+        // sign-in method) lands here as error_description, written as
+        // "PreSignUp failed with error <sentence>." Show the sentence and hand
+        // it to the taskpane, which closes this dialog and shows it in the
+        // panel. Mirrors cleanCognitoErrorDescription in
+        // src/platforms/helpers/authErrors.ts.
         console.error('OAuth error:', error, errorDescription);
-        showError(`Authentication failed: ${error}${errorDescription ? ' - ' + errorDescription : ''}`);
+        const message = readableSignInError(errorDescription, error);
+        showError(message);
+        sendMessage({ type: 'AUTH_ERROR', error: message });
         return;
       }
 
       if (!code) {
         console.error('No authorization code received');
-        showError('No authorization code received from authentication provider');
+        showError(SIGN_IN_FAILED_MESSAGE);
+        sendMessage({ type: 'AUTH_ERROR', error: SIGN_IN_FAILED_MESSAGE });
         return;
       }
 
@@ -410,6 +428,28 @@
         fetched_at: Math.floor(Date.now()),
         userInfo: userInfo
       };
+    }
+
+    const SIGN_IN_FAILED_MESSAGE = 'Sign-in could not be completed. Please try again. If this keeps happening, contact your admin or the Candle team.';
+
+    function readableSignInError(description, errorCode) {
+      const text = (description || '')
+        // Cognito wraps the trigger sentence twice: the API layer adds
+        // "<Trigger> failed with error ", and managed login renders that
+        // behind "Invalid input: ". Match any lead-in up to the first
+        // "failed with error" so both forms are stripped. Kept identical to
+        // TRIGGER_PREFIX in src/platforms/helpers/authErrors.ts and to the
+        // inline copy in apps/options/public/oauth-callback.html.
+        .replace(/^\s*(?:[^:]{0,80}:\s*)?[A-Za-z_]+ failed with error[:\s]*/i, '')
+        .trim()
+        .replace(/\.{2,}$/, '.');
+      if (text) {
+        return text;
+      }
+      if (errorCode === 'access_denied') {
+        return 'The sign-in window was closed before sign-in finished. Try again when you are ready.';
+      }
+      return SIGN_IN_FAILED_MESSAGE;
     }
 
     function sendMessage(message) {
