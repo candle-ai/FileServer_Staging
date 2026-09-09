@@ -62,7 +62,6 @@
     <div class="loading" id="loading">
       <p>Redirecting to sign in...</p>
     </div>
-    <button class="auth-button" id="reopen" style="display: none" onclick="startAuth()">Open the sign-in window again</button>
     <div class="error" id="error">
       <p id="error-message"></p>
       <button class="auth-button" onclick="location.reload()">Try Again</button>
@@ -197,17 +196,23 @@
     }
 
     // ---- Outlook on the web: handoff mode ---------------------------------
-    // On the web the Office dialog is a real browser popup, and Cognito managed
-    // login serves Cross-Origin-Opener-Policy: same-origin. Navigating this
-    // window to it would sever the handle Office tracks the dialog by, and
-    // Office would report the dialog closed within seconds. So the taskpane
-    // hands this page a ready-made authorize URL (the taskpane holds the PKCE
-    // verifier and polls the API for the code), and this page's only job is to
-    // open that URL in a second window and stay put.
+    // On the web the taskpane owns the sign-in: it holds the PKCE verifier,
+    // hands this page a ready-made authorize URL, and polls the API for the
+    // code that Cognito parks there. Office requires the dialog's first page to
+    // be on the add-in's own domain, which is the only reason this page loads
+    // at all in that mode; its one job is to send the dialog window straight
+    // on to Cognito, with no click and no second window. Cognito's COOP header
+    // will sever Office's handle on this window a few seconds later and Office
+    // will report the dialog as closed; the taskpane knows to ignore that on
+    // the web, and the API callback page closes the window when sign-in ends.
     //
-    // The page opens whatever it is handed, so it refuses anything that is not
-    // one of our Cognito hosts.
+    // The page redirects to whatever it is handed, so it refuses anything that
+    // is not one of our Cognito hosts.
     var HANDOFF_HOST_PATTERN = /(^|\.)trycandle\.ai$|(^|\.)amazoncognito\.com$/;
+
+    function isHandoffMode(search) {
+      return new URLSearchParams(search).get('mode') === 'handoff';
+    }
 
     function getHandoffAuthorizeUrl(search) {
       var params = new URLSearchParams(search);
@@ -224,23 +229,25 @@
       return url.toString();
     }
 
-    function openSignInWindow(authorizeUrl) {
-      var signInWindow = null;
-      try {
-        // Called from the click on Sign In, so the popup blocker allows it.
-        // Deliberately unnamed: Outlook on the web keeps its own dialog state
-        // in window.name, and a name would not let a second click find the
-        // first window anyway once COOP has moved it to another context group.
-        signInWindow = window.open(authorizeUrl, '_blank', 'popup=yes,width=520,height=720');
-      } catch (e) {
-        signInWindow = null;
+    // The one seam through which this page navigates, so tests can observe it.
+    function redirectToSignIn(authorizeUrl) {
+      window.location.replace(authorizeUrl);
+    }
+
+    // Returns true when the page is in handoff mode (whether or not the
+    // redirect happened), so the caller knows the desktop flow does not apply.
+    function startHandoffIfRequested() {
+      if (!isHandoffMode(window.location.search)) return false;
+      var authorizeUrl = getHandoffAuthorizeUrl(window.location.search);
+      if (!authorizeUrl) {
+        console.error('Handoff mode with a missing or untrusted authorize URL');
+        showError('This sign-in link is not valid. Close this window and try again from Candle.');
+        return true;
       }
-      if (!signInWindow) {
-        showError('Your browser blocked the sign-in window. Allow pop-ups for this page, then try again.');
-        return;
-      }
-      try { signInWindow.focus(); } catch (e) { /* the handle may already be severed */ }
-      showWaitingForSignIn();
+      console.log('Handoff mode: sending the dialog to Cognito...');
+      showLoading();
+      redirectToSignIn(authorizeUrl);
+      return true;
     }
 
     // Initialize configuration
@@ -249,11 +256,14 @@
     // Display environment info
     document.getElementById('env-info').textContent = `Environment: ${CONFIG.environment}`;
 
+    // Outlook on the web: leave for Cognito immediately. Everything below this
+    // point is the desktop in-dialog flow.
+    var IN_HANDOFF_MODE = startHandoffIfRequested();
+
     async function startAuth() {
-      var handoffUrl = getHandoffAuthorizeUrl(window.location.search);
-      if (handoffUrl) {
-        console.log(`Opening the sign-in window (handoff mode, ${CONFIG.environment} environment)...`);
-        openSignInWindow(handoffUrl);
+      if (IN_HANDOFF_MODE) {
+        // Try Again after a refused URL simply re-runs the handoff check.
+        startHandoffIfRequested();
         return;
       }
 
@@ -431,26 +441,12 @@
 
     function showLoading() {
       document.getElementById('sign-in').style.display = 'none';
-      document.getElementById('reopen').style.display = 'none';
       document.getElementById('loading').style.display = 'block';
       document.getElementById('error').style.display = 'none';
     }
 
-    // Handoff mode: the sign-in continues in the other window and the taskpane
-    // closes this dialog once it has the tokens. The button covers the case
-    // where that window was closed or lost behind others.
-    function showWaitingForSignIn() {
-      document.getElementById('sign-in').style.display = 'none';
-      document.getElementById('error').style.display = 'none';
-      var loading = document.getElementById('loading');
-      loading.querySelector('p').textContent = 'Finish signing in in the window that just opened. This dialog will close on its own.';
-      loading.style.display = 'block';
-      document.getElementById('reopen').style.display = 'inline-block';
-    }
-
     function showError(message) {
       document.getElementById('sign-in').style.display = 'none';
-      document.getElementById('reopen').style.display = 'none';
       document.getElementById('loading').style.display = 'none';
       document.getElementById('error').style.display = 'block';
       document.getElementById('error-message').textContent = message;
@@ -459,7 +455,8 @@
     // Initialize when Office is ready
     Office.onReady(() => {
       console.log(`Office ready in auth dialog (${CONFIG.environment} environment)`);
-      
+      if (IN_HANDOFF_MODE) return;
+
       // Check if this is a callback
       const urlParams = new URLSearchParams(window.location.search);
       if (urlParams.get('callback') === 'true') {
