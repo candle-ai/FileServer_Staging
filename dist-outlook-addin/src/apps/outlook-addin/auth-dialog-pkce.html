@@ -58,10 +58,11 @@
   <div class="auth-container">
     <h2>Sign in to Candle</h2>
     <p>Please sign in to access your account.</p>
-    <button class="auth-button" onclick="startAuth()">Sign In</button>
+    <button class="auth-button" id="sign-in" onclick="startAuth()">Sign In</button>
     <div class="loading" id="loading">
       <p>Redirecting to sign in...</p>
     </div>
+    <button class="auth-button" id="reopen" style="display: none" onclick="startAuth()">Open the sign-in window again</button>
     <div class="error" id="error">
       <p id="error-message"></p>
       <button class="auth-button" onclick="location.reload()">Try Again</button>
@@ -195,13 +196,67 @@
       return generateCodeVerifier(); // Use same function for state
     }
 
+    // ---- Outlook on the web: handoff mode ---------------------------------
+    // On the web the Office dialog is a real browser popup, and Cognito managed
+    // login serves Cross-Origin-Opener-Policy: same-origin. Navigating this
+    // window to it would sever the handle Office tracks the dialog by, and
+    // Office would report the dialog closed within seconds. So the taskpane
+    // hands this page a ready-made authorize URL (the taskpane holds the PKCE
+    // verifier and polls the API for the code), and this page's only job is to
+    // open that URL in a second window and stay put.
+    //
+    // The page opens whatever it is handed, so it refuses anything that is not
+    // one of our Cognito hosts.
+    var HANDOFF_HOST_PATTERN = /(^|\.)trycandle\.ai$|(^|\.)amazoncognito\.com$/;
+
+    function getHandoffAuthorizeUrl(search) {
+      var params = new URLSearchParams(search);
+      if (params.get('mode') !== 'handoff') return null;
+      var raw = params.get('authorize');
+      if (!raw) return null;
+      var url;
+      try {
+        url = new URL(raw);
+      } catch (e) {
+        return null;
+      }
+      if (url.protocol !== 'https:' || !HANDOFF_HOST_PATTERN.test(url.hostname)) return null;
+      return url.toString();
+    }
+
+    function openSignInWindow(authorizeUrl) {
+      var signInWindow = null;
+      try {
+        // Called from the click on Sign In, so the popup blocker allows it.
+        // Deliberately unnamed: Outlook on the web keeps its own dialog state
+        // in window.name, and a name would not let a second click find the
+        // first window anyway once COOP has moved it to another context group.
+        signInWindow = window.open(authorizeUrl, '_blank', 'popup=yes,width=520,height=720');
+      } catch (e) {
+        signInWindow = null;
+      }
+      if (!signInWindow) {
+        showError('Your browser blocked the sign-in window. Allow pop-ups for this page, then try again.');
+        return;
+      }
+      try { signInWindow.focus(); } catch (e) { /* the handle may already be severed */ }
+      showWaitingForSignIn();
+    }
+
     // Initialize configuration
     const CONFIG = getEnvironmentConfig();
-    
+
     // Display environment info
     document.getElementById('env-info').textContent = `Environment: ${CONFIG.environment}`;
 
     async function startAuth() {
+      var handoffUrl = getHandoffAuthorizeUrl(window.location.search);
+      if (handoffUrl) {
+        console.log(`Opening the sign-in window (handoff mode, ${CONFIG.environment} environment)...`);
+        openSignInWindow(handoffUrl);
+        return;
+      }
+
       console.log(`Starting PKCE authentication in ${CONFIG.environment} environment...`);
       showLoading();
 
@@ -375,13 +430,27 @@
     }
 
     function showLoading() {
-      document.querySelector('.auth-button').style.display = 'none';
+      document.getElementById('sign-in').style.display = 'none';
+      document.getElementById('reopen').style.display = 'none';
       document.getElementById('loading').style.display = 'block';
       document.getElementById('error').style.display = 'none';
     }
 
+    // Handoff mode: the sign-in continues in the other window and the taskpane
+    // closes this dialog once it has the tokens. The button covers the case
+    // where that window was closed or lost behind others.
+    function showWaitingForSignIn() {
+      document.getElementById('sign-in').style.display = 'none';
+      document.getElementById('error').style.display = 'none';
+      var loading = document.getElementById('loading');
+      loading.querySelector('p').textContent = 'Finish signing in in the window that just opened. This dialog will close on its own.';
+      loading.style.display = 'block';
+      document.getElementById('reopen').style.display = 'inline-block';
+    }
+
     function showError(message) {
-      document.querySelector('.auth-button').style.display = 'none';
+      document.getElementById('sign-in').style.display = 'none';
+      document.getElementById('reopen').style.display = 'none';
       document.getElementById('loading').style.display = 'none';
       document.getElementById('error').style.display = 'block';
       document.getElementById('error-message').textContent = message;
