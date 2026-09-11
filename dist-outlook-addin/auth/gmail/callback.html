@@ -21,16 +21,27 @@
       //   leg 2  ?code=... / ?error=...           -> messageParent to the taskpane
       //
       // The taskpane opens leg 1 and waits on DialogMessageReceived.
+      //
+      // Connecting the user's own Outlook mailbox uses leg 1 only. It forwards
+      // to Candle's own /oauth/login/outlook, which drives the Microsoft sign-in
+      // and writes the registration server-side, so nothing comes back here to
+      // message; the taskpane re-checks registration instead.
 
       // Leg 1 redirects before Office is involved, so in a plain browser this
       // page would otherwise be an open redirector. It forwards to exactly the
-      // provider sign-in origins Candle uses and nothing else. Same guard as
-      // getHandoffAuthorizeUrl in auth-dialog-pkce.html.
+      // provider sign-in origins Candle uses, plus Candle's own API hosts, and
+      // nothing else. Same guard as getHandoffAuthorizeUrl in
+      // auth-dialog-pkce.html.
       var ALLOWED_START_ORIGINS = [
         'https://app.clio.com',
         'https://eu.app.clio.com',
         'https://ca.app.clio.com',
-        'https://accounts.google.com'
+        'https://accounts.google.com',
+        'https://api.trycandle.ai',
+        'https://api.staging.trycandle.ai',
+        'https://api.demo.trycandle.ai',
+        'https://api.dev.trycandle.ai',
+        'https://api.dev2.trycandle.ai'
       ];
 
       function show(text, detail) {
