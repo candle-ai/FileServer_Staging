@@ -37,6 +37,11 @@
         'https://eu.app.clio.com',
         'https://ca.app.clio.com',
         'https://accounts.google.com',
+        // The Work agent's own Outlook mailbox connect. Entra always authorizes
+        // on this one host regardless of tenant, because the app is registered
+        // against /common. Without it leg 1 refuses its own provider and the
+        // user sees "This connection link is not valid".
+        'https://login.microsoftonline.com',
         'https://api.trycandle.ai',
         'https://api.staging.trycandle.ai',
         'https://api.demo.trycandle.ai',
